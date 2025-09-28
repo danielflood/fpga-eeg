@@ -1,0 +1,3 @@
+[submodule "lib/finn"]
+	path = lib/finn
+	url = https://github.com/Xilinx/finn.git
