@@ -1,0 +1,9 @@
+# Use the FINN image you already built from lib/finn
+ARG BASE_TAG
+FROM ${BASE_TAG}
+
+WORKDIR /workspace
+
+# Only copy requirements for better cache hits
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install -U pip && pip install -r /tmp/requirements.txt
