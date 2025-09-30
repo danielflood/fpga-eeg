@@ -1,29 +1,47 @@
 import numpy as np
+import torch
 from torch import nn
 from torch.nn import init
-from torch.nn.functional import elu
 
 import brevitas.nn as qnn
-from brevitas.quant import Int8Bias as BiasQuant
-
-from braindecode.models.base import BaseModel
-from braindecode.torch_ext.modules import Expression, AvgPool2dWithConv
-from braindecode.torch_ext.functions import identity
-from braindecode.torch_ext.util import np_to_var
-
 from brevitas.inject.enum import ScalingImplType
 from brevitas.inject.defaults import Int8ActPerTensorFloatMinMaxInit
 
+from braindecode.models.base import BaseModel
+from braindecode.torch_ext.modules import Expression
+from braindecode.torch_ext.util import np_to_var
+
+# ---------- Quantizer configs ----------
+
 class InputQuantizer(Int8ActPerTensorFloatMinMaxInit):
-    bit_width = 16
+    """
+    Input quantizer: keep it <= 8b so FINN can convert to MultiThreshold.
+    Set min/max to realistic EEG ranges for your dataset if you know them.
+    """
+    bit_width = 8
     min_val = -4096.0
     max_val = 4095.0
-    scaling_impl_type = ScalingImplType.CONST # Fix the quantization range to [min_val, max_val]
+    scaling_impl_type = ScalingImplType.CONST  # fixed range
+
+def act(bit_width=8):
+    # Activation quantizer: always return quant tensor so QONNX carries metadata.
+    return qnn.QuantReLU(bit_width=bit_width, return_quant_tensor=True)
+
+def aid(bit_width=8):
+    # Identity that still carries quant metadata.
+    return qnn.QuantIdentity(bit_width=bit_width, return_quant_tensor=True)
+
+# ---------- Model ----------
 
 class QuantDeep4Net(BaseModel):
     """
-    Deep ConvNet model from [1]_.
-
+    FINN-friendly Deep4Net from [1]:
+      - QuantConv2d everywhere (optionally split first layer)
+      - Activations <= 8-bit + return_quant_tensor=True
+      - Bias enabled to simplify BN fold
+      - Native pooling (MaxPool2d / AvgPool2d), final pool non-overlapping
+      - Ends at (N, C, 1, 1); do softmax/squeeze on host
+    
     References
     ----------
 
@@ -51,25 +69,27 @@ class QuantDeep4Net(BaseModel):
         filter_length_3=9,
         n_filters_4=200,
         filter_length_4=9,
-        first_nonlin=elu,
-        first_pool_mode="max",
-        first_pool_nonlin=identity,
-        later_nonlin=elu,
-        later_pool_mode="max",
-        later_pool_nonlin=identity,
-        drop_prob=0.5,
-        double_time_convs=False,
+        first_pool_mode="max",   # "max" or "avg"
+        later_pool_mode="max",   # "max" or "avg"
+        drop_prob=0.0,           # keep 0.0 for export; dropout is a no-op in eval
         split_first_layer=True,
         batch_norm=True,
         batch_norm_alpha=0.1,
         stride_before_pool=False,
-        quant_bit_width=6,
+        act_bit_width=8,         # <= 8 so FINN converts Quant->MultiThreshold
+        weight_bit_width=8,      # pick 4/6/8; keep <= 8 for simplicity
     ):
         if final_conv_length == "auto":
             assert input_time_length is not None
-
         self.__dict__.update(locals())
         del self.self
+
+    def _pool_cls(self, mode):
+        if mode == "max":
+            return nn.MaxPool2d
+        elif mode == "avg":
+            return nn.AvgPool2d
+        raise ValueError(f"Unsupported pool mode: {mode}")
 
     def create_network(self):
         if self.stride_before_pool:
@@ -78,35 +98,41 @@ class QuantDeep4Net(BaseModel):
         else:
             conv_stride = 1
             pool_stride = self.pool_time_stride
-        pool_class_dict = dict(max=nn.MaxPool2d, mean=AvgPool2dWithConv)
-        first_pool_class = pool_class_dict[self.first_pool_mode]
-        later_pool_class = pool_class_dict[self.later_pool_mode]
+
+        FirstPool = self._pool_cls(self.first_pool_mode)
+        LaterPool  = self._pool_cls(self.later_pool_mode)
+
         model = nn.Sequential()
-        model.add_module("quantizer", qnn.QuantHardTanh(act_quant=InputQuantizer))
+
+        # Quantize input
+        model.add_module(
+            "input_quant",
+            qnn.QuantHardTanh(act_quant=InputQuantizer, return_quant_tensor=True)
+        )
+
+        # First block (optionally split into temporal + spatial convs)
         if self.split_first_layer:
             model.add_module("dimshuffle", Expression(_transpose_time_to_spat))
             model.add_module(
                 "conv_time",
-                nn.Conv2d(
+                qnn.QuantConv2d(
                     1,
                     self.n_filters_time,
                     (self.filter_time_length, 1),
                     stride=1,
-                    # weight_bit_width=6,
-                    # #bias_quant=BiasQuant,
-                    # return_quant_tensor=True,
+                    bias=True,
+                    weight_bit_width=self.weight_bit_width,
                 ),
             )
             model.add_module(
                 "conv_spat",
-                nn.Conv2d(
+                qnn.QuantConv2d(
                     self.n_filters_time,
                     self.n_filters_spat,
                     (1, self.in_chans),
                     stride=(conv_stride, 1),
-                    bias=not self.batch_norm,
-                    # weight_bit_width=6,
-                    # #bias_quant=BiasQuant,
+                    bias=True,
+                    weight_bit_width=self.weight_bit_width,
                 ),
             )
             n_filters_conv = self.n_filters_spat
@@ -118,12 +144,12 @@ class QuantDeep4Net(BaseModel):
                     self.n_filters_time,
                     (self.filter_time_length, 1),
                     stride=(conv_stride, 1),
-                    bias=not self.batch_norm,
-                    weight_bit_width=self.quant_bit_width,
-                    #bias_quant=BiasQuant,
+                    bias=True,
+                    weight_bit_width=self.weight_bit_width,
                 ),
             )
             n_filters_conv = self.n_filters_time
+
         if self.batch_norm:
             model.add_module(
                 "bnorm",
@@ -134,92 +160,73 @@ class QuantDeep4Net(BaseModel):
                     eps=1e-5,
                 ),
             )
-        model.add_module("conv_nonlin", qnn.QuantReLU(bit_width=self.quant_bit_width))#Expression(self.first_nonlin))
+
+        model.add_module("conv_nonlin", act(self.act_bit_width))
         model.add_module(
             "pool",
-            first_pool_class(
-                kernel_size=(self.pool_time_length, 1), stride=(pool_stride, 1)
-            ),
+            FirstPool(kernel_size=(self.pool_time_length, 1), stride=(pool_stride, 1)),
         )
-        model.add_module("pool_nonlin", qnn.QuantIdentity(bit_width=self.quant_bit_width))#Expression(self.first_pool_nonlin))
+        model.add_module("pool_nonlin", aid(self.act_bit_width))
 
-        def add_conv_pool_block(
-            model, n_filters_before, n_filters, filter_length, block_nr, last
-        ):
-            suffix = "_{:d}".format(block_nr)
-            model.add_module("drop" + suffix, nn.Dropout(p=self.drop_prob))
+        # Helper to append repeated conv/pool blocks
+        def add_conv_pool_block(model, n_in, n_out, filt_len, idx, last):
+            sfx = f"_{idx}"
+            if self.drop_prob and self.drop_prob > 0:
+                model.add_module("drop" + sfx, nn.Dropout(p=self.drop_prob))
             model.add_module(
-                "conv" + suffix,
+                "conv" + sfx,
                 qnn.QuantConv2d(
-                    n_filters_before,
-                    n_filters,
-                    (filter_length, 1),
-                    stride=(conv_stride, 1),
-                    bias=not self.batch_norm,
-                    weight_bit_width=self.quant_bit_width,
-                    #bias_quant=BiasQuant,
+                    n_in,
+                    n_out,
+                    (filt_len, 1),
+                    stride=(1, 1) if not self.stride_before_pool else (self.pool_time_stride, 1),
+                    bias=True,
+                    weight_bit_width=self.weight_bit_width,
                 ),
             )
             if self.batch_norm:
                 model.add_module(
-                    "bnorm" + suffix,
+                    "bnorm" + sfx,
                     nn.BatchNorm2d(
-                        n_filters,
+                        n_out,
                         momentum=self.batch_norm_alpha,
                         affine=True,
                         eps=1e-5,
                     ),
                 )
-            model.add_module("nonlin" + suffix, qnn.QuantReLU(bit_width=self.quant_bit_width))
+            model.add_module("nonlin" + sfx, act(self.act_bit_width))
 
-                
             if not last:
                 model.add_module(
-                    "pool" + suffix,
-                    later_pool_class(
-                        kernel_size=(self.pool_time_length, 1),
-                        stride=(pool_stride, 1),
-                    ),
+                    "pool" + sfx,
+                    LaterPool(kernel_size=(self.pool_time_length, 1),
+                              stride=(1, 1) if self.stride_before_pool else (self.pool_time_stride, 1)),
                 )
-                model.add_module(
-                    "pool_nonlin" + suffix, qnn.QuantIdentity(bit_width=self.quant_bit_width)
-                )
+                model.add_module("pool_nonlin" + sfx, aid(self.act_bit_width))
             else:
+                # FINAL POOL: make non-overlapping so FINN converts it to StreamingMaxPool
                 model.add_module(
-                    "pool" + suffix,
-                    later_pool_class(
-                        kernel_size=(5, 1),
-                        stride=(1, 1),
-                    ),
+                    "pool" + sfx,
+                    LaterPool(kernel_size=(5, 1), stride=(5, 1))
                 )
-                model.add_module(
-                    "pool_nonlin" + suffix, qnn.QuantIdentity(bit_width=self.quant_bit_width, return_quant_tensor=True)
-                )
+                model.add_module("pool_nonlin" + sfx, aid(self.act_bit_width))
 
+        add_conv_pool_block(model, n_filters_conv, self.n_filters_2, self.filter_length_2, 2, False)
+        add_conv_pool_block(model, self.n_filters_2, self.n_filters_3, self.filter_length_3, 3, False)
+        add_conv_pool_block(model, self.n_filters_3, self.n_filters_4, self.filter_length_4, 4, True)
 
-        add_conv_pool_block(
-            model, n_filters_conv, self.n_filters_2, self.filter_length_2, 2, False
-        )
-        add_conv_pool_block(
-            model, self.n_filters_2, self.n_filters_3, self.filter_length_3, 3, False
-        )
-        add_conv_pool_block(
-            model, self.n_filters_3, self.n_filters_4, self.filter_length_4, 4, True
-        )
-
-        # model.add_module('drop_classifier', nn.Dropout(p=self.drop_prob))
+        # Determine final conv length if needed
         model.eval()
         if self.final_conv_length == "auto":
-            out = model(
-                np_to_var(
-                    np.ones(
-                        (1, self.in_chans, self.input_time_length, 1),
-                        dtype=np.float32,
-                    )
+            with torch.no_grad():
+                dummy = np_to_var(
+                    np.ones((1, self.in_chans, self.input_time_length, 1), dtype=np.float32)
                 )
-            )
-            n_out_time = out.cpu().data.numpy().shape[2]
+                out = model(dummy)
+                n_out_time = out.cpu().data.numpy().shape[2]
             self.final_conv_length = n_out_time
+
+        # Classifier conv (quantized) — produces (N, C, 1, 1)
         model.add_module(
             "conv_classifier",
             qnn.QuantConv2d(
@@ -227,38 +234,29 @@ class QuantDeep4Net(BaseModel):
                 self.n_classes,
                 (self.final_conv_length, 1),
                 bias=True,
-                weight_bit_width=self.quant_bit_width,
-                bias_quant=BiasQuant,
+                weight_bit_width=self.weight_bit_width,
             ),
         )
+
+        # Softmax and Squeeze operations will be removed in dataflow partition step.
         model.add_module("softmax", nn.LogSoftmax(dim=1))
         model.add_module("squeeze", Expression(_squeeze_final_output))
 
-        # Initialization, xavier is same as in our paper...
-        # was default from lasagne
+        # ---------- Initialization (like original) ----------
         init.xavier_uniform_(model.conv_time.weight, gain=1)
-        # maybe no bias in case of no split layer and batch norm
-        if self.split_first_layer or (not self.batch_norm):
-            init.constant_(model.conv_time.bias, 0)
         if self.split_first_layer:
             init.xavier_uniform_(model.conv_spat.weight, gain=1)
-            if not self.batch_norm:
-                init.constant_(model.conv_spat.bias, 0)
         if self.batch_norm:
             init.constant_(model.bnorm.weight, 1)
             init.constant_(model.bnorm.bias, 0)
+
+        # conv blocks
         param_dict = dict(list(model.named_parameters()))
         for block_nr in range(2, 5):
-            conv_weight = param_dict["conv_{:d}.weight".format(block_nr)]
-            init.xavier_uniform_(conv_weight, gain=1)
-            if not self.batch_norm:
-                conv_bias = param_dict["conv_{:d}.bias".format(block_nr)]
-                init.constant_(conv_bias, 0)
-            else:
-                bnorm_weight = param_dict["bnorm_{:d}.weight".format(block_nr)]
-                bnorm_bias = param_dict["bnorm_{:d}.bias".format(block_nr)]
-                init.constant_(bnorm_weight, 1)
-                init.constant_(bnorm_bias, 0)
+            init.xavier_uniform_(param_dict[f"conv_{block_nr}.weight"], gain=1)
+            if self.batch_norm:
+                init.constant_(param_dict[f"bnorm_{block_nr}.weight"], 1)
+                init.constant_(param_dict[f"bnorm_{block_nr}.bias"], 0)
 
         init.xavier_uniform_(model.conv_classifier.weight, gain=1)
         init.constant_(model.conv_classifier.bias, 0)
