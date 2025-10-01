@@ -40,7 +40,6 @@ class QuantDeep4Net(BaseModel):
       - Activations <= 8-bit + return_quant_tensor=True
       - Bias enabled to simplify BN fold
       - Native pooling (MaxPool2d / AvgPool2d), final pool non-overlapping
-      - Ends at (N, C, 1, 1); do softmax/squeeze on host
     
     References
     ----------

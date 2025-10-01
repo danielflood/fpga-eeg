@@ -1,9 +1,20 @@
-# Use the FINN image you already built from lib/finn
+# 1) Freeze the base image environment (clean)
 ARG BASE_TAG
-FROM ${BASE_TAG}
+FROM ${BASE_TAG} AS base-freeze
+# keep only package==version lines; drop editables/VCS/direct URLs
+RUN python -m pip freeze --exclude-editable \
+    | grep -E '^[A-Za-z0-9_.-]+==[^=]+' \
+    > /constraints.txt
 
+# 2) Build your project layer under those constraints
+FROM ${BASE_TAG}
 WORKDIR /workspace
 
-# Only copy requirements for better cache hits
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install -U pip && pip install -r /tmp/requirements.txt
+COPY --from=base-freeze /constraints.txt /tmp/base-constraints.txt
+
+RUN python -m pip install --upgrade-strategy only-if-needed \
+    --no-build-isolation \
+    -r /tmp/requirements.txt \
+    -c /tmp/base-constraints.txt
+
