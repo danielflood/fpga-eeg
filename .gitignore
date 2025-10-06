@@ -1,4 +1,7 @@
 onnx
+dataset
+raw_data
+results
 outputs
 ssh_keys
 __pycache__

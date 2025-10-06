@@ -62,9 +62,15 @@ From there, you can open the notebooks folder and follow the flow:
   ``` 
 
 ## References
-1. Schirrmeister, R. T., Springenberg, J. T., Fiederer, L. D. J.,      Glasstetter, M., Eggensperger, K., Tangermann, M., Hutter, F. & Ball, T. (2017).  
+1. Schirrmeister, R. T., Springenberg, J. T., Fiederer, L. D. J.,      Glasstetter, M., Eggensperger, K., Tangermann, M., Hutter, F. & Ball, T. (2017).   
   *Deep learning with convolutional neural networks for EEG decoding and visualization.*  
   Human Brain Mapping, Aug. 2017. [https://doi.org/10.1002/hbm.23730](https://doi.org/10.1002/hbm.23730)
+2. Lee, M.-H., Kwon, O.-Y., Kim, Y.-J., Kim, H.-K., Lee, Y.-E., Williamson, J., Fazli, S., & Lee, S.-W. (2019).  
+  *Supporting data for "EEG Dataset and OpenBMI Toolbox for Three BCI Paradigms: An Investigation into BCI Illiteracy"*  
+  [Data set]. GigaScience Database. https://doi.org/10.5524/100542
+3. K. Zhang, N. Robinson, S.-W. Lee, C. Guan (2021)  
+   *Adaptive transfer learning for EEG motor imagery classification with deep Convolutional Neural Network.*  
+   Neural Networks. https://doi.org/10.1016/j.neunet.2020.12.013 
 
 ## Licence
 MIT License — see [LICENSE](./LICENCE) for details.
