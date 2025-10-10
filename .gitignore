@@ -1,8 +1,10 @@
 onnx
+outputs
 dataset
 raw_data
 results
-outputs
+rough
 ssh_keys
 __pycache__
 .ipynb_checkpoints
+.Trash-*

@@ -109,7 +109,7 @@ class QuantDeep4Net(BaseModel):
             qnn.QuantHardTanh(act_quant=InputQuantizer, return_quant_tensor=True)
         )
 
-        # First block (optionally split into temporal + spatial convs)
+        # First block (optionally split into temporal + spatial convs), avoid as FINN doesn't like this
         if self.split_first_layer:
             model.add_module("dimshuffle", Expression(_transpose_time_to_spat))
             model.add_module(
@@ -232,7 +232,7 @@ class QuantDeep4Net(BaseModel):
                 self.n_filters_4,
                 self.n_classes,
                 (self.final_conv_length, 1),
-                bias=True,
+                bias=False, # No bias to prevent it being left behind after dataflow partitioning
                 weight_bit_width=self.weight_bit_width,
             ),
         )
@@ -258,7 +258,7 @@ class QuantDeep4Net(BaseModel):
                 init.constant_(param_dict[f"bnorm_{block_nr}.bias"], 0)
 
         init.xavier_uniform_(model.conv_classifier.weight, gain=1)
-        init.constant_(model.conv_classifier.bias, 0)
+        # init.constant_(model.conv_classifier.bias, 0) # No bias on final layer
 
         # Start in eval mode
         model.eval()
