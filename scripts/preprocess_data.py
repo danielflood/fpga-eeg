@@ -13,7 +13,7 @@ from tqdm import tqdm
 parser = argparse.ArgumentParser(
     description='Preprocessor for KU Data')
 parser.add_argument("-s", "--source", type=str, default="./raw_data", help='Path to raw KU data')
-parser.add_argument("-t", "--target", type=str, default="./dataset",  help='Path to pre-processed KU data')
+parser.add_argument("-t", "--target", type=str, default="./notebooks/dataset",  help='Path to pre-processed KU data')
 parser.add_argument('--foldered-data', action='store_true',
                     help='DEPRECATED. DO NOT use this option ' +
                     'if the data is downloaded from GigaDB.')
