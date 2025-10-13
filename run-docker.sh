@@ -181,7 +181,7 @@ gecho "Using default PYNQ board $PYNQ_BOARD"
 
 # Ensure git-based deps are checked out at correct commit
 if [ "$FINN_SKIP_DEP_REPOS" = "0" ]; then
-  ./fetch-repos.sh
+  ./lib/finn/fetch-repos.sh
 fi
 
 # If xrt path given, copy .deb file to this repo
