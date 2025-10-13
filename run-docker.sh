@@ -122,7 +122,7 @@ elif [ "$1" = "notebook" ]; then
   else
     JUPYTER_PASSWD_ARG="--NotebookApp.password='$JUPYTER_PASSWD_HASH'"
   fi
-  DOCKER_CMD="jupyter notebook --allow-root --no-browser --ip=0.0.0.0 --port $JUPYTER_PORT $JUPYTER_PASSWD_ARG"
+  DOCKER_CMD="jupyter notebook --allow-root --no-browser --ip=0.0.0.0 --port $JUPYTER_PORT $JUPYTER_PASSWD_ARG notebooks/"
   FINN_DOCKER_EXTRA+="-e JUPYTER_PORT=$JUPYTER_PORT "
   FINN_DOCKER_EXTRA+="-e NETRON_PORT=$NETRON_PORT "
   if [ -z "$FINN_SINGULARITY" ]; then
