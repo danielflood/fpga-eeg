@@ -24,6 +24,29 @@ git clone https://github.com/danielflood/fpga-eeg.git
 cd fpga-eeg
 git submodule update --init --recursive
 ``` 
+
+## Getting the Dataset
+
+This project uses the EEG motor imagery (MI) dataset collected by [2]. The original raw data can be accessed [here](https://gigadb.org/dataset/100542).
+Following the preprocessing pipeline from [3], we focus only on the motor imagery tasks.
+
+To download the dataset, start the Docker container:
+```bash
+./run-docker.sh
+```
+
+Then run the download script:
+```
+python ./scripts/get_dataset.py
+```
+
+Once downloaded, preprocess the data:
+```
+python ./scripts/preprocess_data.py
+```
+
+After preprocessing completes, you can safely remove the raw_data/ directory to save disk space:
+
 ## Running the Project
 
 Start the **FINN Docker** environment with:
@@ -33,12 +56,13 @@ Start the **FINN Docker** environment with:
  ``` 
 
 
-This will build the **Docker** image (if not already built) and launch **Jupyter Lab** at the project root.
+This will build the **Docker** image (if not already built) and launch **Jupyter Lab** from the notebooks directory.
 
-From there, you can open the notebooks folder and follow the flow:
+From there, you can follow the flow:
 
-1.  **Train** the quantized Deep4 model (on fake EEG data for now).
-2.  **Synthesize** the trained model into FPGA hardware with PYNQ drivers.
+1.  **Train** the quantized Deep4 model.
+2.  **Synthesize** the trained model into a bitfile for FPGA deployment.
+3.  **Deploy** the synthesized bitfile onto a Zynq device using PYNQ.
 
 ## Repository Layout
 
