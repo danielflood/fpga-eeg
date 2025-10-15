@@ -38,7 +38,7 @@ from pynq.pl_server.device import Device
 io_shape_dict = {
     # FINN DataType for input and output tensors
     "idt" : [DataType['INT8']],
-    "odt" : [DataType['INT16']],
+    "odt" : [DataType['INT8']],
     # shapes for input and output tensors (NHWC layout)
     "ishape_normal" : [(1, 1000, 1, 62)],
     "oshape_normal" : [(1, 1, 1, 2)],
@@ -48,7 +48,7 @@ io_shape_dict = {
     "ishape_folded" : [(1, 1000, 1, 62, 1)],
     "oshape_folded" : [(1, 1, 1, 2, 1)],
     "ishape_packed" : [(1, 1000, 1, 62, 1)],
-    "oshape_packed" : [(1, 1, 1, 2, 2)],
+    "oshape_packed" : [(1, 1, 1, 2, 1)],
     "input_dma_name" : ['idma0'],
     "output_dma_name" : ['odma0'],
     "number_of_external_weights": 0,
