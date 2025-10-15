@@ -62,7 +62,7 @@ From there, you can follow the flow:
 
 1.  **Train** the quantized Deep4 model.
 2.  **Synthesize** the trained model into a bitfile for FPGA deployment.
-3.  **Deploy** the synthesized bitfile onto a Zynq device using PYNQ.
+3.  **Validate** the bitfile by running it on a Zynq device using PYNQ.
 
 ## Repository Layout
 
@@ -76,6 +76,13 @@ From there, you can follow the flow:
 
 - Hardware builds may take significant time.
 - You’ll need a supported FPGA development board (e.g. PYNQ-Z2) for deployment.
+
+## Contributing
+I would really like help with:
+- Running the project from a clean install and fixing any issues.
+- Improving the documentation so that the tutorial is easier to follow.
+
+Feel free to open issues and pull requests if you have any ideas on how I can improve this project.
 
 ## Known Issues
 
